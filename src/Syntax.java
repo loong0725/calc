@@ -1,73 +1,71 @@
 import javafx.util.Pair;
 import java.math.BigInteger;
-import java.util.Stack;
 import java.util.Vector;
 
 public class Syntax {
     private String input;
+    private Vector<Pair<String, String>> tokens;
+    private int currentIndex; // 用于跟踪当前 token 的位置
 
     public Syntax(String input) {
         this.input = input.trim();
+        LexDFA lex = new LexDFA(input);
+        this.tokens = lex.getTokens();
+        this.currentIndex = 0;
     }
 
     public boolean isRight() {
-        LexDFA lex = new LexDFA(input);
-        Vector<Pair<String, String>> tokens = lex.getTokens();
-        if (!lex.isRight() || tokens.isEmpty()) return false;
-
-        int operandCount = 0, operatorCount = 0;
-        for (Pair<String, String> token : tokens) {
-            if (token.getKey().equals("NUM")) operandCount++;
-            else if (token.getKey().equals("OP")) operatorCount++;
+        if (!new LexDFA(input).isRight() || tokens.isEmpty()) return false;
+        try {
+            parseExpr(); // 尝试解析整个表达式
+            return currentIndex == tokens.size(); // 检查是否所有 token 都被消耗
+        } catch (Exception e) {
+            return false;
         }
-        return operandCount == operatorCount + 1;
     }
 
     public Pair<BigInteger, String> getResult() {
-        LexDFA lex = new LexDFA(input);
-        Vector<Pair<String, String>> tokens = lex.getTokens();
+        currentIndex = 0; // 重置索引
+        try {
+            return parseExpr(); // 解析并返回结果
+        } catch (Exception e) {
+            return new Pair<>(null, "Syntax error: " + e.getMessage());
+        }
+    }
 
-        Stack<BigInteger> valueStack = new Stack<>();
-        Stack<String> infixStack = new Stack<>();
+    // LL(1) 递归下降解析器：解析 <Expr>
+    private Pair<BigInteger, String> parseExpr() throws Exception {
+        if (currentIndex >= tokens.size()) {
+            throw new Exception("Unexpected end of input");
+        }
 
-        for (int i = tokens.size() - 1; i >= 0; i--) {
-            Pair<String, String> token = tokens.get(i);
-            String type = token.getKey();
-            String value = token.getValue();
+        Pair<String, String> currentToken = tokens.get(currentIndex);
+        String type = currentToken.getKey();
+        String value = currentToken.getValue();
 
-            if (type.equals("NUM")) {
-                valueStack.push(new BigInteger(value));
-                infixStack.push(value);
-            } else if (type.equals("OP")) {
-                // Check if there are enough operands
-                if (valueStack.size() < 2 || infixStack.size() < 2) {
-                    return new Pair<>(null, "Syntax error: Not enough operands for operator " + value);
-                }
-                BigInteger operand1 = valueStack.pop();
-                BigInteger operand2 = valueStack.pop();
-                String infix1 = infixStack.pop();
-                String infix2 = infixStack.pop();
+        // 根据当前 token 类型（前瞻符号）决定推导
+        if (type.equals("OP")) { // <Expr> ::= <Op> <Expr> <Expr>
+            currentIndex++; // 消耗操作符
+            Pair<BigInteger, String> expr1 = parseExpr(); // 递归解析第一个子表达式
+            Pair<BigInteger, String> expr2 = parseExpr(); // 递归解析第二个子表达式
 
-                BigInteger result;
-                String infixExpr;
-                if (value.equals("+")) {
-                    result = operand1.add(operand2);
-                    infixExpr = "(" + infix1 + " + " + infix2 + ")";
-                } else { // "*"
-                    result = operand1.multiply(operand2);
-                    infixExpr = infix1.contains(" ") || infix2.contains(" ") ?
-                            "(" + infix1 + " * " + infix2 + ")" : infix1 + " * " + infix2;
-                }
-                valueStack.push(result);
-                infixStack.push(infixExpr);
+            BigInteger result;
+            String infixExpr;
+            if (value.equals("+")) {
+                result = expr1.getKey().add(expr2.getKey());
+                infixExpr = "(" + expr1.getValue() + " + " + expr2.getValue() + ")";
+            } else { // "*"
+                result = expr1.getKey().multiply(expr2.getKey());
+                infixExpr = expr1.getValue().contains(" ") || expr2.getValue().contains(" ") ?
+                        "(" + expr1.getValue() + " * " + expr2.getValue() + ")" :
+                        expr1.getValue() + " * " + expr2.getValue();
             }
+            return new Pair<>(result, infixExpr);
+        } else if (type.equals("NUM")) { // <Expr> ::= <Num>
+            currentIndex++; // 消耗数字
+            return new Pair<>(new BigInteger(value), value);
+        } else {
+            throw new Exception("Invalid token: " + value);
         }
-
-        // Ensure the expression is fully evaluated
-        if (valueStack.size() != 1 || infixStack.size() != 1) {
-            return new Pair<>(null, "Syntax error: Invalid prefix expression structure");
-        }
-
-        return new Pair<>(valueStack.pop(), infixStack.pop());
     }
 }
